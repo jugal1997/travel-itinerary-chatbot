@@ -30,32 +30,36 @@ class LLMHandler:
         """Generate response from LLM"""
         try:
             if self.provider == "huggingface":
-                # Use chat_completion for conversational models like Llama
-                messages = [{"role": "user", "content": prompt}]
-                
+            # Use chat_completion for conversational models like Llama
+                messages = [
+                {"role": "system", "content": "You are a helpful travel planning assistant."},
+                {"role": "user", "content": prompt}
+            ]
+            
                 response = self.client.chat_completion(
-                    messages=messages,
-                    model=self.model,
-                    max_tokens=max_tokens,
-                    temperature=temperature
-                )
-                
-                # Extract the response text
+                messages=messages,
+                model=self.model,
+                max_tokens=max_tokens,
+                temperature=temperature
+            )
+            
+            # Extract the response text
                 return response.choices[0].message.content
-                
+            
             elif self.provider == "ollama":
                 response = self.client.generate(
-                    model=self.model,
-                    prompt=prompt,
-                    options={
-                        "temperature": temperature,
-                        "num_predict": max_tokens
-                    }
-                )
-                return response['response']
-                
+                model=self.model,
+                prompt=prompt,
+                options={
+                    "temperature": temperature,
+                    "num_predict": max_tokens
+                }
+            )
+            return response['response']
+            
         except Exception as e:
             return f"Error generating response: {str(e)}"
+
     
     def test_connection(self):
         """Test LLM connection"""

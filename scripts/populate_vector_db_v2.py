@@ -1,20 +1,19 @@
 """
-Script to populate ChromaDB vector store with travel knowledge base documents.
-Handles document loading, chunking, embedding, and storage.
+Script to populate ChromaDB using default embeddings (no sentence-transformers)
+This version is more stable and has fewer dependencies.
 """
 
 import os
 import sys
 from pathlib import Path
+import time
 
-# Add src to path so we can import our modules
+# Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from vector_store import VectorStoreManager
-from sentence_transformers import SentenceTransformer
-import chromadb
-from typing import List, Dict
 import re
+from typing import List, Dict
 
 
 class DocumentProcessor:
@@ -54,7 +53,7 @@ class DocumentProcessor:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     content = f.read()
                 
-                # Extract category from path (destinations, travel_tips, etc.)
+                # Extract category from path
                 relative_path = file_path.relative_to(directory)
                 category = relative_path.parts[0] if len(relative_path.parts) > 1 else "general"
                 
@@ -76,28 +75,24 @@ class DocumentProcessor:
         """
         Split text into overlapping chunks
         
-        Uses sentence-aware chunking to avoid breaking mid-sentence.
-        Based on best practices for RAG applications.
-        
         Args:
             text: Input text to chunk
             
         Returns:
             List of text chunks
         """
-        # Split into sentences (simple approach)
+        # Split into sentences
         sentences = re.split(r'(?<=[.!?])\s+', text)
         
         chunks = []
         current_chunk = ""
         
         for sentence in sentences:
-            # If adding this sentence would exceed chunk_size, save current chunk
+            # If adding this sentence exceeds chunk_size, save current chunk
             if len(current_chunk) + len(sentence) > self.chunk_size and current_chunk:
                 chunks.append(current_chunk.strip())
                 
-                # Start new chunk with overlap from previous chunk
-                # Take last few characters for context
+                # Start new chunk with overlap
                 overlap_text = current_chunk[-self.chunk_overlap:] if len(current_chunk) > self.chunk_overlap else current_chunk
                 current_chunk = overlap_text + " " + sentence
             else:
@@ -139,37 +134,19 @@ class DocumentProcessor:
         return processed_chunks
 
 
-class VectorStorePopulator:
-    """Populate vector store with embedded documents"""
+class SimpleVectorStorePopulator:
+    """Populate vector store using ChromaDB's default embeddings"""
     
-    def __init__(self, embedding_model_name='all-MiniLM-L6-v2'):
-        """
-        Initialize populator with embedding model
-        
-        Args:
-            embedding_model_name: Name of sentence-transformers model
-        """
-        print(f"Loading embedding model: {embedding_model_name}...")
-        
-        try:
-            # Test numpy
-            import numpy as np
-            print(f"  ✅ Numpy {np.__version__} available")
-            
-            # Load model
-            self.embedding_model = SentenceTransformer(embedding_model_name)
-            print(f"  ✅ Embedding model loaded")
-            
-        except Exception as e:
-            print(f"  ❌ Error loading model: {e}")
-            raise
-        
+    def __init__(self):
+        """Initialize with ChromaDB's built-in embedding function"""
+        print("Initializing vector store with default embeddings...")
         self.vector_store = VectorStoreManager()
-        print("✅ Vector store initialized")
+        print("✅ Vector store ready (using ChromaDB default embeddings)")
     
     def populate(self, chunks: List[Dict]):
         """
-        Embed chunks and add to vector store
+        Add chunks to vector store
+        ChromaDB will automatically generate embeddings
         
         Args:
             chunks: List of processed text chunks with metadata
@@ -196,44 +173,33 @@ class VectorStorePopulator:
         # Generate unique IDs
         ids = [f"{chunk['filename']}_{chunk['chunk_id']}" for chunk in chunks]
         
-        # Generate embeddings
-        print("🔄 Generating embeddings...")
-        try:
-            embeddings = self.embedding_model.encode(
-                texts, 
-                show_progress_bar=True,
-                convert_to_numpy=True
-            )
-            print(f"✅ Generated {len(embeddings)} embeddings")
-        except Exception as e:
-            print(f"❌ Error generating embeddings: {e}")
-            raise
-        
-        # Add to vector store in batches (ChromaDB has batch size limits)
-        batch_size = 100
+        # Add to vector store in batches
+        # ChromaDB will automatically generate embeddings
+        batch_size = 50
         total_batches = (len(texts) + batch_size - 1) // batch_size
         
-        print(f"\n📤 Adding to vector store in {total_batches} batches...")
+        print(f"📤 Adding to vector store in {total_batches} batches...")
+        print("   (ChromaDB is generating embeddings automatically)")
         
         for i in range(0, len(texts), batch_size):
             batch_texts = texts[i:i+batch_size]
             batch_metadatas = metadatas[i:i+batch_size]
             batch_ids = ids[i:i+batch_size]
-            batch_embeddings = embeddings[i:i+batch_size].tolist()
             
             try:
                 self.vector_store.collection.add(
                     documents=batch_texts,
                     metadatas=batch_metadatas,
-                    ids=batch_ids,
-                    embeddings=batch_embeddings
+                    ids=batch_ids
+                    # No embeddings parameter - ChromaDB generates them
                 )
                 
                 batch_num = i // batch_size + 1
                 print(f"  ✅ Batch {batch_num}/{total_batches} ({len(batch_texts)} chunks)")
+                time.sleep(0.2)  # Small delay to avoid overwhelming the system
                 
             except Exception as e:
-                print(f"  ❌ Error adding batch {i//batch_size + 1}: {e}")
+                print(f"  ❌ Error adding batch {batch_num}: {e}")
                 raise
         
         print(f"\n✅ Successfully added {len(chunks)} chunks to vector store")
@@ -245,6 +211,7 @@ def main():
     
     print("=" * 70)
     print("🚀 TRAVEL CHATBOT - VECTOR DATABASE POPULATION")
+    print("   (Using ChromaDB Default Embeddings)")
     print("=" * 70)
     
     # Initialize processor
@@ -261,12 +228,6 @@ def main():
     
     if not documents:
         print("\n❌ No documents found! Please add .txt files to knowledge_base/")
-        print("   Expected structure:")
-        print("   knowledge_base/")
-        print("   ├── destinations/")
-        print("   ├── travel_tips/")
-        print("   ├── visa_info/")
-        print("   └── sample_itineraries/")
         return
     
     print("-" * 70)
@@ -292,11 +253,11 @@ def main():
     
     # Populate vector store
     print("\n" + "=" * 70)
-    print("🧠 INITIALIZING EMBEDDING MODEL AND VECTOR STORE")
+    print("🧠 POPULATING VECTOR STORE")
     print("=" * 70)
     
     try:
-        populator = VectorStorePopulator()
+        populator = SimpleVectorStorePopulator()
         populator.populate(chunks)
     except Exception as e:
         print(f"\n❌ Error during population: {e}")
@@ -308,13 +269,13 @@ def main():
     print("✅ VECTOR DATABASE POPULATION COMPLETE!")
     print("=" * 70)
     
-    # Test query
+    # Test queries
     print("\n🧪 Testing semantic search...")
     print("-" * 70)
     
     test_queries = [
         "What are the best attractions to visit in Paris?",
-        "How much does a trip cost?",
+        "How much does a trip to Tokyo cost?",
         "What should I pack for travel?"
     ]
     
@@ -335,10 +296,8 @@ def main():
                 print("   ❌ No results found")
         except Exception as e:
             print(f"   ❌ Error: {e}")
-        
-        print()
     
-    print("=" * 70)
+    print("\n" + "=" * 70)
     print("✅ ALL DONE! Your RAG system is ready to use.")
     print("=" * 70)
     print("\nNext steps:")
