@@ -58,6 +58,23 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+def export_conversation_as_text():
+    """Export conversation as downloadable text"""
+    if not st.session_state.messages:
+        return None
+    
+    text = "Travel Itinerary Chatbot - Conversation Export\n"
+    text += "=" * 50 + "\n\n"
+    
+    for msg in st.session_state.messages:
+        role = "You" if msg['role'] == 'user' else "Assistant"
+        timestamp = msg.get('timestamp', '')
+        content = msg['content']
+        text += f"[{timestamp}] {role}:\n{content}\n\n"
+        text += "-" * 50 + "\n\n"
+    
+    return text
+
 
 def initialize_session_state():
     """Initialize session state variables"""
@@ -114,22 +131,52 @@ def main():
     st.markdown("---")
     
     # Sidebar
+        # Sidebar
     with st.sidebar:
         st.header("💬 Chat Controls")
         
         # Clear conversation button
-        if st.button("🗑️ Clear Conversation"):
+        if st.button("🗑️ Clear Conversation", key="clear_conv_btn"):
             st.session_state.messages = []
             st.session_state.conversation_id = datetime.now().strftime("%Y%m%d_%H%M%S")
             st.experimental_rerun()
         
         # Save conversation button
-        if st.button("💾 Save Conversation"):
+        if st.button("💾 Save Conversation", key="save_conv_btn"):
             if st.session_state.messages:
-                # TODO: Implement save to database
-                st.success("✅ Conversation saved!")
+                try:
+                    from database import DatabaseManager
+                    db = DatabaseManager()
+                    
+                    conversation_id = db.save_conversation(
+                        user_id=st.session_state.conversation_id,
+                        messages=st.session_state.messages,
+                        metadata={'session_id': st.session_state.conversation_id}
+                    )
+                    st.success(f"✅ Conversation saved! (ID: {conversation_id})")
+                except Exception as e:
+                    st.error(f"❌ Error saving: {str(e)}")
+                    import traceback
+                    st.code(traceback.format_exc())
             else:
                 st.warning("⚠️ No conversation to save")
+        
+        # Export conversation button
+        if st.button("📥 Export Chat", key="export_chat_btn"):
+            if st.session_state.messages:
+                try:
+                    export_text = export_conversation_as_text()
+                    st.download_button(
+                        label="📄 Download as TXT",
+                        data=export_text,
+                        file_name=f"chat_export_{st.session_state.conversation_id}.txt",
+                        mime="text/plain",
+                        key="download_txt_btn"
+                    )
+                except Exception as e:
+                    st.error(f"❌ Error exporting: {str(e)}")
+            else:
+                st.warning("⚠️ No conversation to export")
         
         st.markdown("---")
         
@@ -140,7 +187,7 @@ def main():
         
         st.markdown("---")
         
-        # About
+        # About section
         st.subheader("ℹ️ About")
         st.info("""
         This AI-powered chatbot helps you plan your travel itinerary.
@@ -158,7 +205,7 @@ def main():
         - ChromaDB vector store
         """)
         
-                # Sample queries
+        # Sample queries
         st.subheader("💡 Try Asking:")
         sample_queries = [
             "Plan a 5-day trip to Paris",
@@ -168,8 +215,8 @@ def main():
             "Best time to visit Paris"
         ]
         
-        for query in sample_queries:
-            if st.button(f"📝 {query}", key=f"sample_{query}"):
+        for i, query in enumerate(sample_queries):
+            if st.button(f"📝 {query}", key=f"sample_query_{i}"):
                 # Add the query directly as a user message
                 timestamp = datetime.now().strftime("%H:%M:%S")
                 st.session_state.messages.append({
@@ -201,6 +248,7 @@ def main():
                         })
                 
                 st.experimental_rerun()
+
 
     
     # Main chat area
