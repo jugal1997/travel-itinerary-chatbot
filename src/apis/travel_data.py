@@ -2,6 +2,8 @@ import requests
 import json
 from datetime import datetime
 from typing import Dict, List, Optional
+from amadeus import Client, ResponseError
+import os
 
 class TravelDataAPI:
     """Fetch real-time travel data from various sources"""
@@ -11,6 +13,110 @@ class TravelDataAPI:
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
+        
+        # Initialize Amadeus client (optional - only if API keys are set)
+        amadeus_key = os.getenv('AMADEUS_API_KEY')
+        amadeus_secret = os.getenv('AMADEUS_API_SECRET')
+        
+        if amadeus_key and amadeus_secret:
+            self.amadeus = Client(
+                client_id=amadeus_key,
+                client_secret=amadeus_secret
+            )
+        else:
+            self.amadeus = None
+            print("⚠️ Amadeus API not configured - flight search disabled")
+    
+    def search_flights(self, origin: str, destination: str, departure_date: str, 
+                       return_date: str = None, adults: int = 1) -> Dict:
+        """Search for flight offers using Amadeus API"""
+        if not self.amadeus:
+            return {'error': 'Amadeus API not configured'}
+        
+        try:
+            # Search for flight offers
+            response = self.amadeus.shopping.flight_offers_search.get(
+                originLocationCode=origin,
+                destinationLocationCode=destination,
+                departureDate=departure_date,
+                returnDate=return_date,
+                adults=adults,
+                max=5  # Limit to 5 results
+            )
+            
+            # Parse results
+            flights = []
+            for offer in response.data[:3]:  # Top 3 offers
+                price = offer['price']
+                itinerary = offer['itineraries'][0]
+                
+                flights.append({
+                    'price': f"{price['total']} {price['currency']}",
+                    'carrier': itinerary['segments'][0]['carrierCode'],
+                    'duration': itinerary['duration'],
+                    'stops': len(itinerary['segments']) - 1
+                })
+            
+            return {
+                'origin': origin,
+                'destination': destination,
+                'departure_date': departure_date,
+                'flights': flights,
+                'count': len(flights)
+            }
+            
+        except ResponseError as error:
+            return {'error': f"Amadeus API error: {error}"}
+        except Exception as e:
+            return {'error': str(e)}
+    
+    def get_hotel_offers(self, city_code: str, check_in: str, check_out: str) -> Dict:
+        """Get hotel offers using Amadeus API"""
+        if not self.amadeus:
+            return {'error': 'Amadeus API not configured'}
+        
+        try:
+            # Search hotels by city
+            hotels_response = self.amadeus.reference_data.locations.hotels.by_city.get(
+                cityCode=city_code
+            )
+            
+            if not hotels_response.data:
+                return {'error': 'No hotels found'}
+            
+            # Get first few hotel IDs
+            hotel_ids = [hotel['hotelId'] for hotel in hotels_response.data[:5]]
+            
+            # Get offers for these hotels
+            offers_response = self.amadeus.shopping.hotel_offers_search.get(
+                hotelIds=','.join(hotel_ids),
+                checkInDate=check_in,
+                checkOutDate=check_out
+            )
+            
+            hotels = []
+            for offer in offers_response.data[:3]:
+                hotel_data = offer['hotel']
+                price_data = offer['offers'][0]['price']
+                
+                hotels.append({
+                    'name': hotel_data.get('name', 'Unknown'),
+                    'price_per_night': f"{price_data['total']} {price_data['currency']}",
+                    'rating': hotel_data.get('rating', 'N/A')
+                })
+            
+            return {
+                'city': city_code,
+                'check_in': check_in,
+                'check_out': check_out,
+                'hotels': hotels,
+                'count': len(hotels)
+            }
+            
+        except ResponseError as error:
+            return {'error': f"Amadeus API error: {error}"}
+        except Exception as e:
+            return {'error': str(e)}
     
     def get_weather_data(self, city: str, country_code: str = None) -> Dict:
         """Get weather data for a destination using Open-Meteo (free, no API key)"""
@@ -118,6 +224,42 @@ Current Weather for {data['city']}, {data['country']}:
 Exchange Rates (Base: {data['base']}):
 {rates_text}
 Last updated: {data['timestamp']}
+"""
+        
+        elif data_type == 'flights':
+            if 'error' in data:
+                return f"Flight data unavailable: {data['error']}"
+            
+            if data['count'] == 0:
+                return "No flights found for this route."
+            
+            flights_text = '\n'.join([
+                f"- {f['carrier']}: {f['price']} ({f['duration']}, {f['stops']} stops)"
+                for f in data['flights']
+            ])
+            
+            return f"""
+Flight Options from {data['origin']} to {data['destination']}:
+Departure: {data['departure_date']}
+{flights_text}
+"""
+        
+        elif data_type == 'hotels':
+            if 'error' in data:
+                return f"Hotel data unavailable: {data['error']}"
+            
+            if data['count'] == 0:
+                return "No hotels found."
+            
+            hotels_text = '\n'.join([
+                f"- {h['name']}: {h['price_per_night']}/night (Rating: {h['rating']})"
+                for h in data['hotels']
+            ])
+            
+            return f"""
+Hotel Options in {data['city']}:
+Check-in: {data['check_in']}, Check-out: {data['check_out']}
+{hotels_text}
 """
         
         elif data_type == 'visa':
