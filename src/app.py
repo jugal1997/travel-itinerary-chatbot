@@ -210,11 +210,10 @@ def main():
         sample_queries = [
             "Plan a 5-day trip to Paris",
             "What's the budget for Tokyo?",
-            "What should I pack for Bali?",
-            "Do I need a visa for Japan?",
-            "Best time to visit Paris"
+            "Show flights from DEL to CDG on 2026-02-15",
+            "Find hotels in Paris from 2026-02-15 to 2026-02-20",
+            "What's the weather in London?"
         ]
-        
         for i, query in enumerate(sample_queries):
             if st.button(f"📝 {query}", key=f"sample_query_{i}"):
                 # Add the query directly as a user message

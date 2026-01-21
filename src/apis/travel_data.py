@@ -7,7 +7,21 @@ import os
 
 class TravelDataAPI:
     """Fetch real-time travel data from various sources"""
-    
+    # Common airline code to name mapping
+    AIRLINE_NAMES = {
+        '6E': 'IndiGo', 'AI': 'Air India', 'UK': 'Vistara', 'SG': 'SpiceJet',
+        'EK': 'Emirates', 'QR': 'Qatar Airways', 'EY': 'Etihad Airways',
+        'BA': 'British Airways', 'LH': 'Lufthansa', 'AF': 'Air France',
+        'KL': 'KLM', 'LX': 'Swiss', 'OS': 'Austrian Airlines',
+        'TK': 'Turkish Airlines', 'SQ': 'Singapore Airlines', 'CX': 'Cathay Pacific',
+        'QF': 'Qantas', 'NH': 'ANA', 'JL': 'Japan Airlines',
+        'AA': 'American Airlines', 'UA': 'United Airlines', 'DL': 'Delta',
+        'AC': 'Air Canada', 'VS': 'Virgin Atlantic',
+        'UL': 'SriLankan Airlines', 'VJ': 'VietJet Air', 'W2': 'FlexFlight',
+        'KU': 'Kuwait Airways', '9W': 'Jet Airways', 'G8': 'Go Air',
+        'FZ': 'flydubai', 'WY': 'Oman Air', 'MS': 'EgyptAir',
+        'TG': 'Thai Airways', 'MH': 'Malaysia Airlines', 'GA': 'Garuda Indonesia',
+    }
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({
@@ -26,7 +40,14 @@ class TravelDataAPI:
         else:
             self.amadeus = None
             print("⚠️ Amadeus API not configured - flight search disabled")
-    
+    def _get_airline_name(self, code: str) -> str:
+        """Get full airline name from IATA code"""
+        airline_name = self.AIRLINE_NAMES.get(code, None)
+        if airline_name:
+            return f"{airline_name} ({code})"
+        return code  # Return code if name not found
+
+
     def search_flights(self, origin: str, destination: str, departure_date: str, 
                        return_date: str = None, adults: int = 1) -> Dict:
         """Search for flight offers using Amadeus API"""
@@ -34,28 +55,51 @@ class TravelDataAPI:
             return {'error': 'Amadeus API not configured'}
         
         try:
+            print(f"🔍 Amadeus API call parameters:")
+            print(f"   Origin: {origin}")
+            print(f"   Destination: {destination}")
+            print(f"   Departure: {departure_date}")
+            print(f"   Adults: {adults}")
+            
             # Search for flight offers
             response = self.amadeus.shopping.flight_offers_search.get(
                 originLocationCode=origin,
                 destinationLocationCode=destination,
                 departureDate=departure_date,
-                returnDate=return_date,
                 adults=adults,
-                max=5  # Limit to 5 results
+                max=5
             )
+            
+            if not response.data:
+                return {
+                    'origin': origin,
+                    'destination': destination,
+                    'departure_date': departure_date,
+                    'flights': [],
+                    'count': 0,
+                    'message': 'No flights found for this route/date'
+                }
             
             # Parse results
             flights = []
-            for offer in response.data[:3]:  # Top 3 offers
+            for offer in response.data[:3]:
                 price = offer['price']
                 itinerary = offer['itineraries'][0]
+                first_segment = itinerary['segments'][0]
+                carrier_code = first_segment['carrierCode']
                 
                 flights.append({
                     'price': f"{price['total']} {price['currency']}",
-                    'carrier': itinerary['segments'][0]['carrierCode'],
-                    'duration': itinerary['duration'],
-                    'stops': len(itinerary['segments']) - 1
+                    'carrier': carrier_code,
+                    'carrier_name': self._get_airline_name(carrier_code),  # Add full name
+                    'duration': self._format_duration(itinerary['duration']),
+                    'stops': len(itinerary['segments']) - 1,
+                    'departure': first_segment['departure']['at'],
+                    'arrival': itinerary['segments'][-1]['arrival']['at']
                 })
+
+            
+            print(f"✅ Amadeus returned {len(flights)} flight options")
             
             return {
                 'origin': origin,
@@ -66,10 +110,40 @@ class TravelDataAPI:
             }
             
         except ResponseError as error:
-            return {'error': f"Amadeus API error: {error}"}
+            print(f"❌ Amadeus ResponseError:")
+            print(f"   Status Code: {error.response.status_code}")
+            print(f"   Response: {error.response.result}")
+            
+            # Try to extract error details
+            try:
+                error_body = error.response.result
+                if 'errors' in error_body:
+                    for err in error_body['errors']:
+                        print(f"   Error: {err.get('title', 'Unknown')} - {err.get('detail', '')}")
+            except:
+                pass
+            
+            return {'error': f"Amadeus API error: Status {error.response.status_code}"}
         except Exception as e:
+            print(f"❌ Flight search exception: {type(e).__name__}: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return {'error': str(e)}
-    
+
+    def _format_duration(self, duration: str) -> str:
+        """Convert ISO 8601 duration (PT14H15M) to readable format (14h 15m)"""
+        import re
+        hours = re.search(r'(\d+)H', duration)
+        minutes = re.search(r'(\d+)M', duration)
+        
+        result = []
+        if hours:
+            result.append(f"{hours.group(1)}h")
+        if minutes:
+            result.append(f"{minutes.group(1)}m")
+        
+        return ' '.join(result) if result else duration
+
     def get_hotel_offers(self, city_code: str, check_in: str, check_out: str) -> Dict:
         """Get hotel offers using Amadeus API"""
         if not self.amadeus:
@@ -230,19 +304,30 @@ Last updated: {data['timestamp']}
             if 'error' in data:
                 return f"Flight data unavailable: {data['error']}"
             
-            if data['count'] == 0:
-                return "No flights found for this route."
+            if data.get('count', 0) == 0:
+                message = data.get('message', 'No flights found')
+                return f"Flight search from {data['origin']} to {data['destination']}: {message}"
             
             flights_text = '\n'.join([
-                f"- {f['carrier']}: {f['price']} ({f['duration']}, {f['stops']} stops)"
-                for f in data['flights']
+                f"{i+1}. **{f['carrier_name']}** - €{f['price'].split()[0]}\n"
+                f"   Duration: {f['duration']} ({f['stops']} stop{'s' if f['stops'] != 1 else ''})\n"
+                f"   Departure: {f['departure'][:16].replace('T', ' at ')}\n"
+                f"   Arrival: {f['arrival'][:16].replace('T', ' at ')}"
+                for i, f in enumerate(data['flights'])
             ])
             
             return f"""
-Flight Options from {data['origin']} to {data['destination']}:
-Departure: {data['departure_date']}
+✈️ REAL-TIME FLIGHT DATA:
+Route: {data['origin']} → {data['destination']}
+Date: {data['departure_date']}
+Found {data['count']} available flights:
+
 {flights_text}
+
+Prices shown are in Euros. Book directly with airlines or travel booking sites for confirmation.
 """
+
+
         
         elif data_type == 'hotels':
             if 'error' in data:
