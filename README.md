@@ -468,11 +468,10 @@ This project is licensed under the MIT License - see LICENSE file for details.
 ## 📧 Contact
 
 **Developer:** Jugal Patel  
-**Location:** Surat, Gujarat, India
 
-**GitHub:** [Your GitHub Profile]  
-**Email:** [Your Email]  
-**LinkedIn:** [Your LinkedIn]
+**GitHub:**  https://github.com/jugal1997
+
+**LinkedIn:** https://www.linkedin.com/in/jugal-patel-30a230190/
 
 ---
 
